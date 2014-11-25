@@ -1,5 +1,5 @@
 /*
-** BootMenu - Boot Image Menu for the Ouya
+** BootMenu - Boot Image Menu for the M.O.J.O.
 **
 ** Compile for ARM on desktop Linux:
 **     arm-linux-gnueabihf-gcc -Os bootmenu.c -o bootmenu  \
@@ -21,14 +21,15 @@
 #define FALSE		(0)
 #define TRUE		(1)
 
-#define MAX_MENU_SEL	(5)
+#define MAX_MENU_SEL	(6)
 
 #define BPP		(32 / 8)		/* bytes/pixel for 32 bpp */
 #define FB_SIZE		(BPP * xres * yres)
 
-#define MAX_IMG_SIZE	(8 * 1024 * 1024)	/* Android kernel file */
+#define MAX_IMG_SIZE	(20 * 1024 * 1024)	/* Android kernel file */
 
 #define MOUNT_PATH	"/dev/block/platform/sdhci-tegra.3/by-name"
+#define EXTSD_PATH	"/dev/block/platform/sdhci-tegra.2/by-num/p1"
 
 
 void alarm_handler(int sig) { fprintf(stderr, "watchdog expired, booting fallback\n"); exit(1); }
@@ -98,9 +99,10 @@ int main(int argc, char *argv[])
 	*/
 	if (fork() == 0)  {	/* child? */
 		char *arg[] = {"/sbin/sh", "-c",
-			"mkdir /tmp/m_data /tmp/m_system; "
-			"mount "MOUNT_PATH"/UDA /tmp/m_data; "
-			"mount "MOUNT_PATH"/APP /tmp/m_system", NULL};
+			"mkdir /tmp/data /tmp/system tmp/ext_sd; "
+			"mount "MOUNT_PATH"/UDA /tmp/data; "
+			"mount "MOUNT_PATH"/APP /tmp/system; "
+			"mount "EXTSD_PATH" /tmp/ext_sd", NULL};
 		execvp(arg[0], arg);
 		exit(0);
 	}
@@ -137,7 +139,7 @@ int main(int argc, char *argv[])
 
 			write_text(fb_tmp2_buf, xres, yres, fontmap,
 				 6, xres / 200, FALSE,
-				"Ouya Bootmenu");
+				"M.O.J.O Bootmenu");
 			write_text(fb_tmp2_buf, xres, yres, fontmap,
 				 7, xres / 200, FALSE,
 				"-------------");
@@ -147,23 +149,23 @@ int main(int argc, char *argv[])
 				"Normal Boot");
 			write_text(fb_tmp2_buf, xres, yres, fontmap,
 				 10, xres / 200, (menu_sel==2),
-				"Alternate Boot");
-			write_text(fb_tmp2_buf, xres, yres, fontmap,
+				"Boot Internal SDCard");
 				 11, xres / 200, (menu_sel==3),
-				"Recovery");
 			write_text(fb_tmp2_buf, xres, yres, fontmap,
-				 13, xres / 200, (menu_sel==4),
-				"Bootloader");
+				"Boot External SDCard");
+			write_text(fb_tmp2_buf, xres, yres, fontmap,
+				 12, xres / 200, (menu_sel==4),
+				"Reboot Recovery");
 			write_text(fb_tmp2_buf, xres, yres, fontmap,
 				 14, xres / 200, (menu_sel==5),
+				"Reboot Bootloader");
+			write_text(fb_tmp2_buf, xres, yres, fontmap,
+				 15, xres / 200, (menu_sel==6),
 				"Failsafe");
 
 			write_text(fb_tmp2_buf, xres, yres, fontmap,
 				 19, xres / 200, FALSE,
-				"POWER moves to next item");
-			write_text(fb_tmp2_buf, xres, yres, fontmap,
-				 20, xres / 200, FALSE,
-				"Wait two seconds to select");
+				"Selection confirms in two seconds");
 
 			if (fb_fi.smem_len >= 1)
 				memcpy(fb_map_buf, fb_tmp2_buf, FB_SIZE);
@@ -179,13 +181,16 @@ int main(int argc, char *argv[])
 	*/
 	switch (menu_sel)  {
 		case 1:
-			img_pname = "/tmp/m_system/boot.img";
+			img_pname = "/tmp/system/boot.img";
 			break;
 		case 2:
-			img_pname = "/tmp/m_data/media/altboot.img";
-			img2_pname = "/tmp/m_data/media/0/altboot.img";
+			img_pname = "/tmp/data/media/boot.img";
+			img2_pname = "/tmp/data/media/0/boot.img";
 			break;
 		case 3:
+			img_pname = "/tmp/ext_sd/boot.img";
+			break;
+		case 4:
 			fprintf(stderr, "reboot recovery\n");
 			sync();
 			if (fork() == 0)  {
@@ -197,7 +202,7 @@ int main(int argc, char *argv[])
 
 			sleep(2);
 			break;
-		case 4:
+		case 5:
 			fprintf(stderr, "reboot bootloader\n");
 			sync();
 			if (fork() == 0)  {
@@ -209,7 +214,7 @@ int main(int argc, char *argv[])
 
 			sleep(2);
 			break;
-		case 5:
+		case 6:
 			fprintf(stderr, "failsafe exit (to CWM)\n");
 			break;
 	}
@@ -223,7 +228,7 @@ int main(int argc, char *argv[])
 			char *arg[] = {"/sbin/sh", "-c",
 				"kexec --load-hardboot /tmp/zImage"
 				" --initrd /tmp/initramfs.cpio.gz"
-				" --mem-min=0x8E000000"
+				" --mem-min=0x85000000"
 				" --command-line=\"$(cat /tmp/cmdline"
 						      " /proc/cmdline)\" ; "
 				"kexec -e", NULL};
@@ -240,7 +245,7 @@ int main(int argc, char *argv[])
 	fprintf(stderr, "close and exit\n");
 	if (fork() == 0)  {
 		char *arg[] = {"/sbin/sh", "-c",
-			"umount /tmp/m_data; umount /tmp/m_system", NULL};
+			"umount /tmp/data; umount /tmp/system; umount /tmp/ext_sd", NULL};
 		execvp(arg[0], arg);
 		exit(0);
 	}
@@ -269,7 +274,7 @@ int read_config(char *fname, int *menu, int *timeout)
 	FILE				*fp;
 	char				pname[100];
 
-	sprintf(pname, "/tmp/m_data/media/%s", fname);
+	sprintf(pname, "/tmp/data/media/%s", fname);
 	if ((fp = fopen(pname, "r")) != NULL)  {
 		fprintf(stderr, "opened cfg\n");
 		ret = fscanf(fp, "%d %d", &v1, &v2);
